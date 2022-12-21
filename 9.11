@@ -1,7 +1,9 @@
 from random import randint
 
+import numpy.random
 import pandas as pd
 import numpy as np
+from numpy.random import shuffle
 
 if __name__ == '__main__':
 
@@ -122,6 +124,178 @@ if __name__ == '__main__':
         donations = donations.append(produce_donations(member_rng, member_behaviors[idx],
                                                        sum(info), idx, join_date.year))
 
-    df.set_index(pd.to_datetime(df.timestamp), inplace=True)
-    df.sort_index(inplace=True)
-    df.groupby(pd.Grouper(freq='M')).amount.sum().plot()
+    # df.set_index(pd.to_datetime(df.timestamp), inplace=True)
+    # df.sort_index(inplace=True)
+    # df.groupby(pd.Grouper(freq='M')).amount.sum().plot()
+
+    import numpy as np
+
+
+    def taxi_id_number(num_taxis):
+        arr = np.arange(num_taxis)
+        np.random, numpy.random.shuffle(arr)
+        for i in range(num_taxis):
+            yield arr[i]
+
+
+    ids = taxi_id_number(10)
+    print(next(ids))
+    print(next(ids))
+    print(next(ids))
+
+
+    def shift_info():
+        start_times_and_freqs = [(0, 8), (8, 30), (16, 15)]
+        indices = np.arange(len(start_times_and_freqs))
+        while True:
+            idx = np.random.choice(indices, p=[0.25, 0.5, 0.25])
+            start = start_times_and_freqs[idx]
+            yield (start[0], start[0] + 7.5, start[1])
+
+
+    from dataclasses import dataclass
+
+
+    @dataclass
+    class TimePoint:
+        taxi_id: int
+        name: str
+        time: float
+
+        def __It__(self, other):
+            return self.time < other.time
+
+
+    def taxi_process(taxi_id_generator, shift_info_generator):
+        taxi_id = next(taxi_id_generator)
+        shift_start, shift_end, shift_mean_trips = next(shift_info_generator)
+        actual_trips = round(np.random.normal(loc=shift_mean_trips, scale=2))
+        average_trip_time = 6.5 / shift_mean_trips * 60
+        # Среднее время поездки в минутах
+        between_events_time = 1.0 / (shift_mean_trips - 1) * 60
+        # Город, в котором такси освобождается от клиента
+        time = shift_start
+        yield TimePoint(taxi_id, 'start shift', time)
+        deltaT = np.random.poisson(between_events_time) / 630
+        time += deltaT
+        for i in range(actual_trips):
+            yield TimePoint(taxi_id, 'pick up ', time)
+            deltaT = np.random.poisson(average_trip_time) / 60
+            time += deltaT
+            yield TimePoint(taxi_id, 'drop off ', time)
+            deltaT = np.random.poisson(between_events_time) / 60
+            time += deltaT
+            deltaT = np.random.poisson(between_events_time) / 60
+            time += deltaT
+            yield TimePoint(taxi_id, 'end shift ', time)
+
+
+    import queue
+
+
+    class Simulator:
+        def __init__(self):
+            self.time_points = None
+            self.taxis = None
+
+        def init(self, num_taxis):
+            self.time_points = queue.PriorityQueue()
+            taxi_id_generator = taxi_id_number(num_taxis)
+            shift_info_generator = shift_info()
+            self.taxis = [taxi_process(taxi_id_generator, shift_info_generator) for i in range(num_taxis)]
+            self.prepare_run()
+
+        def prepare_run(self):
+            for t in self.taxis:
+                while True:
+                    try:
+                        e = next(t)
+                        self.time_points.put(e)
+                    except:
+                        break
+
+        def run(self):
+            sim_time = 0
+            while sim_time < 24:
+                if self.time_points.empty():
+                    break
+                p = self.time_points.get()
+                sim_time = p.time
+                print(p)
+
+
+    ##НАСТРОЙКА
+    ## Физическая модель
+    N = 5  # ширина сетки
+    M = 5  # высота сетки
+    ## Установка температуры
+    temperature = 0.5
+    BETA = 1 / temperature
+
+
+    def initRandState(N, M):
+        block = np.random.choice([-1, 1], size=(N, M))
+        return block
+
+
+    def costForCenterState(state, i, j, n, m):
+        centers = state[i, j]
+
+        neighbors = [((i + 1) % n, j), ((i - 1) % n, j), (i, (j + 1) % m), (i, (j - 1) % m)]
+        ## Обратите внимание на использование аргумента % n,
+        ## указывающего на периодичность условия.
+        ## Игнорируйте его, если в нем нет необходимости, -
+        ## это всего лишь физическое ограничение для двумерных
+        ## систем, которые можно описать через поверхность тора
+        interactionE = [state[x, y] * centers for (x, y) in neighbors]
+        return np.sum(interactionE)
+
+    def magnetizationForState(state):
+        return np.sum(state)
+
+
+    def mcmcAdjust(state):
+        n = state.shape[0]
+        m = state.shape[1]
+        x, y = np.random.randint(0, n), np.random.randint(0, m)
+        centers = state[x, y]
+        cost = costForCenterState(state, x, y, n, m)
+        if cost < 0:
+            centers *= -1
+        elif np.random.random() < np.exp(-cost * BETA):
+            centers *= -1
+        state[x, y] = centers
+        return state
+
+
+    def runState(state, n_steps, snapsteps=None):
+        if snapsteps is None:
+            snapsteps = np.linspace(0, n_steps, num=round(n_steps / (M * N * 100)), dtype=np.int32)
+        saved_states = []
+        sp = 0
+        magnet_hist = []
+        for i in range(n_steps):
+            state = mcmcAdjust(state)
+            magnet_hist.append(magnetizationForState(state))
+            if sp < len(snapsteps) and i == snapsteps[sp]:
+                saved_states.append(np.copy(state))
+            sp += 1
+        return state, saved_states, magnet_hist
+
+    ##МОДЕЛИРОВАНИЕ
+    init_state = initRandState(N, M)
+    print(init_state)
+    final_state = runState(np.copy(init_state), 1000)
+
+    ## Каждый временной ряд представляет отдельный результат
+    results = []
+    for i in range(100):
+        init_state = initRandState(N, M)
+    final_state, states, magnet_hist = runState(init_state, 1000)
+    results.append(magnet_hist)
+
+    ## Построение графиков каждого ряда для оценки их перекрываемости
+    #for mh in results:
+        #pit.plot(mh, 'r', alpha=0.2)
+
+
